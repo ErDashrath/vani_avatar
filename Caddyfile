@@ -1,0 +1,72 @@
+# ═══════════════════════════════════════════════════════════════
+# Caddy Configuration for Voice Avatar App
+# ═══════════════════════════════════════════════════════════════
+# Copy this file to /etc/caddy/Caddyfile on your server
+#
+# Caddy automatically handles:
+# ✅ HTTPS/SSL certificates (Let's Encrypt)
+# ✅ Certificate renewal
+# ✅ HTTP → HTTPS redirect
+# ✅ HTTP/2
+# ═══════════════════════════════════════════════════════════════
+
+# Replace these with your actual domains
+{$DOMAIN:yourdomain.com} {
+	# Serve frontend static files
+	root * /var/www/voice-avatar/frontend/dist
+	
+	# Enable file server
+	file_server
+	
+	# SPA fallback: return index.html for non-existent paths
+	try_files {path} /index.html
+	
+	# Cache static assets
+	@static {
+		path *.js *.css *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2 *.ttf *.eot
+	}
+	header @static Cache-Control "public, max-age=31536000, immutable"
+	
+	# Security headers
+	header {
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+	
+	# Reverse proxy API requests to backend
+	handle /api/* {
+		reverse_proxy localhost:8000 {
+			# SSE support for streaming responses
+			flush_interval -1
+		}
+	}
+	
+	# Gzip compression
+	encode gzip
+	
+	# Logging
+	log {
+		output file /var/log/caddy/access.log
+		format json
+	}
+}
+
+# Alternative: Separate API subdomain (optional)
+# api.{$DOMAIN:yourdomain.com} {
+# 	reverse_proxy localhost:8000 {
+# 		flush_interval -1
+# 	}
+# 	
+# 	header {
+# 		Access-Control-Allow-Origin "https://{$DOMAIN:yourdomain.com}"
+# 		Access-Control-Allow-Methods "GET, POST, OPTIONS"
+# 		Access-Control-Allow-Headers "*"
+# 	}
+# 	
+# 	log {
+# 		output file /var/log/caddy/api.log
+# 		format json
+# 	}
+# }
