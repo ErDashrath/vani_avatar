@@ -12,7 +12,7 @@ interface GifAvatarProps {
   isSpeaking: boolean;
 }
 
-const GIF_URL = "/assets/Realistic_Russian_Woman_Passport_Photo-ezgif.com-video-to-gif-converter.gif";
+const GIF_URL = "/assets/avatar.gif";
 const GIF_DURATION_MS = 5000; // 5 seconds
 
 export function GifAvatar({ isSpeaking }: GifAvatarProps) {
