@@ -13,7 +13,7 @@ interface AudioWaveformProps {
 
 export const AudioWaveform = memo(function AudioWaveform({
     isActive,
-    color = "#06b6d4"
+    color = "#3b82f6"
 }: AudioWaveformProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const animationRef = useRef<number>(0);

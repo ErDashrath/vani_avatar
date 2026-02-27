@@ -1,776 +1,580 @@
-/**
- * App – Voice Avatar Interface
- *
- * Clean layout:
- *  • Centered circular avatar with glow ring
- *  • Audio waveform visualization below avatar
- *  • Mic button
- *  • Single message text with fade-out after 5 seconds
- */
-
 import { useCallback, useEffect, useRef, useState, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Avatar } from "./components/Avatar/Avatar";
 import { MicButton } from "./components/Controls/MicButton";
 import { KeyboardIcon, MicIcon, SendIcon } from "./components/UI/icons";
-import { Navbar } from "./components/Controls/Navbar";
-import { Sidebar, ChatSession } from "./components/Controls/Sidebar";
 import { AudioWaveform } from "./components/UI/AudioWaveform";
-import { ChatView } from "./components/Chat/ChatView";
 import { useVoiceInput } from "./hooks/useVoiceInput";
 import { useSpeechSynthesis } from "./hooks/useSpeechSynthesis";
 import { useChatAPI } from "./hooks/useChatAPI";
 import { useChatStore } from "./store/chatStore";
 import { useTheme } from "./hooks/useTheme";
 import type { ChatMessage } from "./types";
+import { DEFAULT_HUMAN_AVATAR_ID } from "./utils/constants";
+import type React from "react";
 
 const MemoAvatar = memo(Avatar);
 
+const AVATAR_OPTIONS = [
+  { id: "emp1", type: "gif" as const, label: "Emp 1", thumb: "/assets/emp1.gif" },
+  { id: "emp2", type: "gif" as const, label: "Emp 2", thumb: "/assets/emp2.gif" },
+  { id: "emp3", type: "gif" as const, label: "Emp 3", thumb: "/assets/emp3.gif" },
+  { id: "dashrath", type: "gif" as const, label: "Dashrath", thumb: "/assets/dashrath.gif" },
+  { id: "women", type: "gif" as const, label: "Women", thumb: "/assets/women.gif" },
+];
+
 export default function App() {
-    const tts = useSpeechSynthesis();
-    const api = useChatAPI();
+  const tts = useSpeechSynthesis();
+  const api = useChatAPI();
+  useTheme();
 
-    // Apply theme
-    useTheme();
+  const status         = useChatStore((s) => s.status);
+  const setStatus      = useChatStore((s) => s.setStatus);
+  const setInterimText = useChatStore((s) => s.setInterimText);
+  const addMessage     = useChatStore((s) => s.addMessage);
+  const interimText    = useChatStore((s) => s.interimText);
+  const messages       = useChatStore((s) => s.messages);
+  const avatarId       = useChatStore((s) => s.avatarId);
+  const setAvatarId    = useChatStore((s) => s.setAvatarId);
+  const setAvatarType  = useChatStore((s) => s.setAvatarType);
 
-    const status = useChatStore((s) => s.status);
-    const setStatus = useChatStore((s) => s.setStatus);
-    const setInterimText = useChatStore((s) => s.setInterimText);
-    const addMessage = useChatStore((s) => s.addMessage);
-    const interimText = useChatStore((s) => s.interimText);
-    const messages = useChatStore((s) => s.messages);
+  const processingRef = useRef(false);
 
-    const processingRef = useRef(false);
+  // Input mode
+  const [inputMode, setInputMode]   = useState<"voice" | "text">("voice");
+  const [manualText, setManualText] = useState("");
 
-    // State for fade-out animation
-    const [showText, setShowText] = useState(true);
-    const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Left sidebar (collapsed icon-only or expanded) — desktop only
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-    // Chat view state
-    const [showChatView, setShowChatView] = useState(false);
+  // Right panel / bottom sheet tabs
+  const [rightTab, setRightTab] = useState<"chat" | "avatar" | "voice">("chat");
 
-    // Input mode state
-    const [inputMode, setInputMode] = useState<'voice' | 'text'>('voice');
-    const [manualText, setManualText] = useState("");
+  // Mobile bottom sheet open/closed
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
 
-    // Sidebar state
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    const [sessions, setSessions] = useState<ChatSession[]>(() => {
-        const saved = localStorage.getItem("voice-avatar-sessions");
-        if (saved) {
-            try {
-                const parsed = JSON.parse(saved);
-                const sessions = parsed.map((s: any) => ({
-                    ...s,
-                    timestamp: new Date(s.timestamp),
-                    messages: s.messages || []
-                }));
-                if (sessions.length > 0) return sessions;
-            } catch (e) {
-                console.error("Error parsing sessions:", e);
-            }
-        }
-        // Always create a default session if none exist
-        const defaultSession: ChatSession = {
-            id: Date.now().toString(),
-            title: "New conversation",
-            timestamp: new Date(),
-            preview: "",
-            messages: []
-        };
-        return [defaultSession];
-    });
-    const [activeSessionId, setActiveSessionId] = useState<string | null>(() => {
-        const saved = localStorage.getItem("voice-avatar-sessions");
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            if (parsed.length > 0) return parsed[0].id;
-        }
-        return null;
-    });
+  // Keep persisted avatar settings human-only and GIF-only.
+  useEffect(() => {
+    const allowedIds = new Set(AVATAR_OPTIONS.map((av) => av.id));
+    if (!allowedIds.has(avatarId)) {
+      setAvatarId(DEFAULT_HUMAN_AVATAR_ID);
+    }
+    if (useChatStore.getState().avatarType !== "gif") {
+      setAvatarType("gif");
+    }
+  }, [avatarId, setAvatarId, setAvatarType]);
 
-    // Hydrate chat store from active session on mount
-    useEffect(() => {
-        if (activeSessionId) {
-            const session = sessions.find(s => s.id === activeSessionId);
-            if (session && session.messages.length > 0) {
-                // We need to populate the store with the saved messages
-                // useChatStore is created outside, so we can access getState()
-                useChatStore.getState().clearMessages();
-                // We can't batch these easily with the current store API, but it's fine for init
-                // Better approach: directly set messages if store allowed it, but addMessage is ok
-                // Actually, let's use a small timeout to ensure store is ready if needed, 
-                // though usually synchronous is fine. 
-                // To avoid multiple re-renders, we could add a `setMessages` to store, 
-                // but `addMessage` works.
-                session.messages.forEach(msg => {
-                    useChatStore.getState().addMessage(msg.role, msg.content);
-                });
-            }
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // Run only once on mount
+  // Chat scroll — auto-switch to chat tab when a message or interim text arrives
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (messages.length > 0 || interimText) {
+      setRightTab("chat");
+      setMobileSheetOpen(true);
+    }
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, interimText]);
 
-    /* ─── Get last message for display ─── */
-    const lastMessage = messages.slice(-1)[0]?.content;
+  /* ─── Process transcript ─── */
+  const processTranscript = useCallback(
+    async (text: string) => {
+      if (!text || processingRef.current) return;
+      tts.prime();
+      processingRef.current = true;
+      setInterimText("");
+      addMessage("user", text);
+      setStatus("thinking");
+      const latestMessages = useChatStore.getState().messages;
+      const history: ChatMessage[] = latestMessages.slice(-6).map((m) => ({
+        role: m.role, content: m.content,
+      }));
 
-    /* ─── Fade out text after 5 seconds of silence ─── */
-    useEffect(() => {
-        // Clear existing timer
-        if (fadeTimerRef.current) {
-            clearTimeout(fadeTimerRef.current);
-        }
+      // ── STREAMING TTS (sentence-by-sentence while API streams) ──
+      // Commented out: starts speaking before the full reply arrives.
+      // Re-enable if you want lower perceived latency.
+      //
+      // let lastSpokenIdx = 0;
+      // const flushSentences = (accumulated: string, force = false) => {
+      //   const re = /[^.!?]+[.!?]+(?:\s+|$)/g;
+      //   let match;
+      //   while ((match = re.exec(accumulated)) !== null) {
+      //     const end = match.index + match[0].length;
+      //     if (match.index >= lastSpokenIdx) {
+      //       const sentence = match[0].trim();
+      //       if (sentence.length > 1) {
+      //         tts.speakQueued(sentence);
+      //         if (useChatStore.getState().status !== "speaking") setStatus("speaking");
+      //       }
+      //       lastSpokenIdx = end;
+      //     }
+      //   }
+      //   if (force) {
+      //     const remaining = accumulated.slice(lastSpokenIdx).trim();
+      //     if (remaining) {
+      //       tts.speakQueued(remaining);
+      //       if (useChatStore.getState().status !== "speaking") setStatus("speaking");
+      //     }
+      //     lastSpokenIdx = accumulated.length;
+      //   }
+      // };
 
-        // Show text when there's activity
-        if (status !== "ready" || interimText || lastMessage) {
-            setShowText(true);
-        }
+      try {
+        // Stream the response (updates interim text only — no TTS yet)
+        const reply = await api.sendMessageStream(text, history, (partial) => {
+          setInterimText(partial);
+          // flushSentences(partial); // streaming TTS disabled
+        });
 
-        // Start fade timer when in ready state
-        if (status === "ready" && !interimText) {
-            fadeTimerRef.current = setTimeout(() => {
-                setShowText(false);
-            }, 5000);
-        }
-
-        return () => {
-            if (fadeTimerRef.current) {
-                clearTimeout(fadeTimerRef.current);
-            }
-        };
-    }, [status, interimText, lastMessage]);
-
-    /* ─── Process & send a finalized transcript to the LLM ─── */
-    const processTranscript = useCallback(
-        async (text: string) => {
-            if (!text || processingRef.current) return;
-            processingRef.current = true;
-
-            setInterimText("");
-            addMessage("user", text);
-            setStatus("thinking");
-
-            const latestMessages = useChatStore.getState().messages;
-            const history: ChatMessage[] = latestMessages.slice(-6).map((m) => ({
-                role: m.role,
-                content: m.content,
-            }));
-
-            try {
-                // Stream response: Update interimText to show progress immediately
-                const reply = await api.sendMessageStream(text, history, (partial) => {
-                    if (useChatStore.getState().status !== "speaking") {
-                        setStatus("speaking");
-                    }
-                    setInterimText(partial);
-                });
-
-                setInterimText(""); // Clear interim once done
-                addMessage("assistant", reply); // Add full message to history
-
-                // Now speak the full response
-                if (reply) {
-                    await tts.speak(reply);
-                }
-                setStatus("ready");
-            } catch {
-                if (useChatStore.getState().status !== "ready") {
-                    setStatus("error");
-                    addMessage("assistant", "Sorry, something went wrong. Please try again.");
-                    setTimeout(() => setStatus("ready"), 2000);
-                }
-            } finally {
-                processingRef.current = false;
-            }
-        },
-        [api, tts, addMessage, setStatus, setInterimText],
-    );
-
-    /* ─── Voice input with auto-silence detection ─── */
-    const voice = useVoiceInput({
-        silenceMs: 1500,
-        onSilenceDetected: processTranscript,
-    });
-
-    /* ─── Sync interim transcript into store ─── */
-    useEffect(() => {
-        setInterimText(voice.isListening ? voice.interimTranscript : "");
-    }, [voice.interimTranscript, voice.isListening, setInterimText]);
-
-    /* ─── Single button: Tap to Speak ─── */
-    const handleMicToggle = useCallback(() => {
-        if (voice.isListening) {
-            const text = voice.stopListening();
-            setInterimText("");
-            if (text) {
-                processTranscript(text);
-            } else {
-                setStatus("ready");
-            }
-        } else {
-            tts.stop();
-            api.abort();
-            voice.startListening();
-            setStatus("listening");
-        }
-    }, [voice, tts, api, setStatus, setInterimText, processTranscript]);
-
-    /* ─── Cancel (during thinking/speaking) ─── */
-    const handleCancel = useCallback(() => {
-        api.abort();
-        tts.stop();
-        voice.stopListening();
-        processingRef.current = false;
+        // ── FULL-RESPONSE TTS ──
+        // Wait for the complete reply, then speak it all at once.
         setInterimText("");
+        addMessage("assistant", reply);
+
+        if (reply.trim()) {
+          if (tts.isSupported) {
+            setStatus("speaking");
+            tts.speakQueued(reply);
+            await tts.whenDone();
+          } else {
+            console.warn("[TTS] Speech synthesis is not supported in this browser.");
+          }
+        }
+
         setStatus("ready");
-    }, [api, tts, voice, setStatus, setInterimText]);
-
-    const handleManualVoiceSend = useCallback((e?: React.MouseEvent) => {
-        e?.stopPropagation();
-        const final = voice.stopListening();
-        if (final.trim()) {
-            processTranscript(final);
-        } else {
-            handleCancel();
+      } catch {
+        if (useChatStore.getState().status !== "ready") {
+          setStatus("error");
+          addMessage("assistant", "Sorry, something went wrong.");
+          setTimeout(() => setStatus("ready"), 2000);
         }
-    }, [voice, processTranscript, handleCancel]);
+      } finally {
+        processingRef.current = false;
+      }
+    },
+    [api, tts, addMessage, setStatus, setInterimText],
+  );
 
-    /* ─── Session management ─── */
-    const saveSessionsToStorage = useCallback((newSessions: ChatSession[]) => {
-        localStorage.setItem("voice-avatar-sessions", JSON.stringify(newSessions));
-    }, []);
+  /* ─── Voice ─── */
+  const voice = useVoiceInput({ silenceMs: 1500, onSilenceDetected: processTranscript });
+  useEffect(() => {
+    setInterimText(voice.isListening ? voice.interimTranscript : "");
+  }, [voice.interimTranscript, voice.isListening, setInterimText]);
 
-    // Save current messages to the active session
-    const saveCurrentMessagesToSession = useCallback(() => {
-        if (!activeSessionId) return;
-        const currentMessages = useChatStore.getState().messages;
-        const updatedSessions = sessions.map(s =>
-            s.id === activeSessionId
-                ? {
-                    ...s,
-                    messages: currentMessages,
-                    preview: currentMessages[currentMessages.length - 1]?.content.slice(0, 50) || "",
-                    title: s.title === "New conversation" && currentMessages.length > 0
-                        ? currentMessages[0].content.slice(0, 30)
-                        : s.title
-                }
-                : s
-        );
-        setSessions(updatedSessions);
-        saveSessionsToStorage(updatedSessions);
-    }, [activeSessionId, sessions, saveSessionsToStorage]);
+  const handleMicToggle = useCallback(() => {
+    if (voice.isListening) {
+      const text = voice.stopListening();
+      setInterimText("");
+      if (text && !processingRef.current) processTranscript(text);
+      else if (!processingRef.current) setStatus("ready");
+    } else {
+      tts.stop(); api.abort();
+      tts.prime();
+      voice.startListening(); setStatus("listening");
+    }
+  }, [voice, tts, api, setStatus, setInterimText, processTranscript]);
 
-    // Sync messages to session when messages change
-    useEffect(() => {
-        if (activeSessionId && messages.length > 0) {
-            const timeoutId = setTimeout(() => {
-                saveCurrentMessagesToSession();
-            }, 500); // Debounce to avoid too frequent saves
-            return () => clearTimeout(timeoutId);
-        }
-    }, [messages, activeSessionId, saveCurrentMessagesToSession]);
+  const handleCancel = useCallback(() => {
+    api.abort(); tts.stop(); voice.stopListening();
+    processingRef.current = false;
+    setInterimText(""); setStatus("ready");
+  }, [api, tts, voice, setStatus, setInterimText]);
 
-    const handleNewSession = useCallback(() => {
-        // Get current messages
-        const currentMessages = useChatStore.getState().messages;
+  const handleManualVoiceSend = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const final = voice.stopListening();
+    if (final.trim()) processTranscript(final);
+    else handleCancel();
+  }, [voice, processTranscript, handleCancel]);
 
-        // Only allow creating new chat if current session has at least one message
-        if (currentMessages.length === 0) {
-            // Current chat is empty, don't create a new one
-            return;
-        }
-
-        // Save current session messages first
-        saveCurrentMessagesToSession();
-
-        // Create new session
-        const newSession: ChatSession = {
-            id: Date.now().toString(),
-            title: "New conversation",
-            timestamp: new Date(),
-            preview: "",
-            messages: []
-        };
-        const updatedSessions = [newSession, ...sessions];
-        setSessions(updatedSessions);
-        saveSessionsToStorage(updatedSessions);
-
-        // Clear current chat and set new session as active
-        useChatStore.getState().clearMessages();
-        setActiveSessionId(newSession.id);
-    }, [sessions, saveSessionsToStorage, saveCurrentMessagesToSession]);
-
-    const handleSelectSession = useCallback((id: string) => {
-        // Save current session first
-        saveCurrentMessagesToSession();
-
-        // Find the session and load its messages
-        const session = sessions.find(s => s.id === id);
-        if (session) {
-            useChatStore.getState().clearMessages();
-            session.messages.forEach(msg => {
-                useChatStore.getState().addMessage(msg.role, msg.content);
-            });
-        }
-        setActiveSessionId(id);
-    }, [sessions, saveCurrentMessagesToSession]);
-
-    const handleDeleteSession = useCallback((id: string) => {
-        const updatedSessions = sessions.filter(s => s.id !== id);
-
-        // Ensure at least one session exists
-        if (updatedSessions.length === 0) {
-            const newSession: ChatSession = {
-                id: Date.now().toString(),
-                title: "New conversation",
-                timestamp: new Date(),
-                preview: "",
-                messages: []
-            };
-            setSessions([newSession]);
-            saveSessionsToStorage([newSession]);
-            useChatStore.getState().clearMessages();
-            setActiveSessionId(newSession.id);
-        } else {
-            setSessions(updatedSessions);
-            saveSessionsToStorage(updatedSessions);
-            if (activeSessionId === id) {
-                // Switch to first available session
-                const nextSession = updatedSessions[0];
-                useChatStore.getState().clearMessages();
-                nextSession.messages.forEach(msg => {
-                    useChatStore.getState().addMessage(msg.role, msg.content);
-                });
-                setActiveSessionId(nextSession.id);
-            }
-        }
-    }, [sessions, activeSessionId, saveSessionsToStorage]);
-
-    const handleRenameSession = useCallback((id: string, newTitle: string) => {
-        const updatedSessions = sessions.map(s =>
-            s.id === id ? { ...s, title: newTitle } : s
-        );
-        setSessions(updatedSessions);
-        saveSessionsToStorage(updatedSessions);
-    }, [sessions, saveSessionsToStorage]);
-
-    const handleToggleChatView = useCallback((sessionId: string) => {
-        // If clicking same session while chat is open, close it
-        if (showChatView && activeSessionId === sessionId) {
-            setShowChatView(false);
-        } else {
-            // Load session messages if switching to different session
-            if (activeSessionId !== sessionId) {
-                saveCurrentMessagesToSession();
-                const session = sessions.find(s => s.id === sessionId);
-                if (session) {
-                    useChatStore.getState().clearMessages();
-                    session.messages.forEach(msg => {
-                        useChatStore.getState().addMessage(msg.role, msg.content);
-                    });
-                }
-            }
-            setActiveSessionId(sessionId);
-            setShowChatView(true);
-        }
-    }, [showChatView, activeSessionId, sessions, saveCurrentMessagesToSession]);
-
-    /* ─── Keyboard shortcuts ─── */
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            if (
-                e.target instanceof HTMLInputElement ||
-                e.target instanceof HTMLTextAreaElement ||
-                e.target instanceof HTMLSelectElement
-            )
-                return;
-
-            if (e.code === "Escape") {
-                e.preventDefault();
-                handleCancel();
-                return;
-            }
-
-            if (e.code === "Space" && status !== "thinking" && status !== "speaking") {
-                e.preventDefault();
-                handleMicToggle();
-            }
-        };
-
-        window.addEventListener("keydown", handler);
-        return () => window.removeEventListener("keydown", handler);
-    }, [status, handleMicToggle, handleCancel]);
-
-    /* ─── Get display text ─── */
-    const getDisplayText = () => {
-        if (status === "listening" && interimText) {
-            return interimText;
-        }
-        if (status === "listening") {
-            return "Listening...";
-        }
-        if (status === "thinking") {
-            return "Thinking...";
-        }
-        if (lastMessage) {
-            return lastMessage;
-        }
-        return "I'm listening, how can I help?";
+  /* ─── Keyboard shortcuts ─── */
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.code === "Escape") { e.preventDefault(); handleCancel(); return; }
+      if (e.code === "Space" && status !== "thinking" && status !== "speaking") {
+        e.preventDefault(); handleMicToggle();
+      }
     };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [status, handleMicToggle, handleCancel]);
 
-    const isActive = status !== "ready";
+  return (
+    <div className="h-screen w-screen flex flex-col md:flex-row bg-black text-white overflow-hidden select-none">
 
-    return (
-        <div
-            className="relative min-h-screen flex flex-col items-center justify-center px-5"
-        >
-            {/* Sidebar */}
-            <Sidebar
-                isOpen={isSidebarOpen}
-                onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-                sessions={sessions}
-                activeSessionId={activeSessionId}
-                showChatView={showChatView}
-                onSelectSession={handleSelectSession}
-                onNewSession={handleNewSession}
-                onDeleteSession={handleDeleteSession}
-                onRenameSession={handleRenameSession}
-                onToggleChatView={handleToggleChatView}
-            />
-
-            {/* Skip link */}
-            <a
-                href="#mic-button"
-                className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-xl focus:bg-accent focus:px-4 focus:py-2 focus:text-surface-950"
-            >
-                Skip to mic
-            </a>
-
-            {/* Navbar */}
-            <Navbar
-                isSidebarOpen={isSidebarOpen}
-                onSidebarToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-                onHome={() => setShowChatView(false)}
-                voices={tts.voices}
-                selectedVoiceName={tts.voiceConfig.voice?.name ?? ""}
-                rate={tts.voiceConfig.rate}
-                onVoiceChange={tts.setVoice}
-                onRateChange={tts.setRate}
-            />
-
-            {/* Main content - vertically centered */}
-            <main className="flex flex-col items-center gap-8">
-                {/* Avatar */}
-                <MemoAvatar isSpeaking={tts.isSpeaking} />
-
-                {/* Input Mode Toggle */}
-                <button
-                    onClick={() => {
-                        if (inputMode === 'voice') {
-                            if (status === 'listening') {
-                                handleCancel();
-                            }
-                            setInputMode('text');
-                        } else {
-                            setInputMode('voice');
-                        }
-                    }}
-                    className="
-                        h-10 px-4 rounded-full
-                        flex items-center gap-2
-                        bg-surface-100 dark:bg-white/10
-                        text-surface-600 dark:text-white/80
-                        hover:bg-surface-200 dark:hover:bg-white/20
-                        transition-colors
-                        text-sm font-medium
-                    "
-                >
-                    {inputMode === 'voice' ? (
-                        <>
-                            <KeyboardIcon size={18} />
-                            <span>Type</span>
-                        </>
-                    ) : (
-                        <>
-                            <MicIcon size={18} />
-                            <span>Voice</span>
-                        </>
-                    )}
-                </button>
-
-                {/* Control Dock */}
-                {inputMode === 'voice' ? (
-
-                    <div
-                        role="button"
-                        tabIndex={0}
-                        id="mic-button"
-                        onClick={status === "ready" ? handleMicToggle : handleCancel}
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                                status === "ready" ? handleMicToggle() : handleCancel();
-                            }
-                        }}
-                        aria-label={status === "ready" ? "Start listening" : "Stop"}
-                        className="
-                        relative flex items-center justify-center
-                        w-80 h-32 px-8
-                        rounded-3xl
-                        bg-surface-50/50 dark:bg-white/5 backdrop-blur-md
-                        border border-black/10 dark:border-white/10
-                        overflow-hidden
-                        cursor-pointer
-                        transition-all duration-300
-                        hover:bg-black/5 dark:hover:bg-white/10 dark:hover:border-white/20
-                        focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent/20
-                        group
-                    "
-                    >
-                        {/* Hover Stop Overlay - only during active states */}
-                        {status !== "ready" && (
-                            <div className="
-                            absolute inset-0 z-20
-                            flex items-center justify-center
-                            bg-white/80 dark:bg-black/50 rounded-3xl
-                            opacity-0 group-hover:opacity-100
-                            transition-opacity duration-200
-                        ">
-                                <div className="flex flex-col items-center gap-2">
-                                    <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center">
-                                        <svg
-                                            className="w-6 h-6 text-red-600 dark:text-red-500"
-                                            fill="currentColor"
-                                            viewBox="0 0 24 24"
-                                        >
-                                            <rect x="6" y="6" width="12" height="12" rx="1" />
-                                        </svg>
-                                    </div>
-                                    <span className="text-sm text-red-600 dark:text-red-400 font-medium">Tap to Stop</span>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Status Text - Subtle & Clean */}
-                        <div className={`
-                absolute bottom-32
-                transition-all duration-500 ease-out
-                ${tts.isSpeaking
-                                ? "opacity-0 translate-y-4"
-                                : "opacity-100 translate-y-0"
-                            }
-            `}>
-                            <div className={`
-                    px-6 py-2.5 rounded-full
-                    backdrop-blur-md
-                    bg-white/40 dark:bg-white/5
-                    border border-white/20 dark:border-white/10
-                    shadow-sm
-                    flex items-center gap-2.5
-                `}>
-                                <div className={`
-                        w-2 h-2 rounded-full
-                        ${status === "listening" ? "bg-red-500 animate-pulse" :
-                                        status === "thinking" ? "bg-blue-400 animate-bounce" :
-                                            status === "speaking" ? "bg-purple-500 animate-pulse" :
-                                                "bg-emerald-400"
-                                    }
-                    `} />
-                                <span className="text-sm font-medium tracking-wide text-surface-800 dark:text-white/90">
-                                    {status === "listening" ? "Listening..." :
-                                        status === "thinking" ? "Thinking..." :
-                                            status === "speaking" ? "Speaking..." :
-                                                "Ready to chat"
-                                    }
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* Interim Transcript (Live Speech to Text) */}
-                        {interimText && status === "listening" && (
-                            <div className="absolute bottom-48 w-full max-w-2xl px-4 text-center animate-fade-in-up">
-                                <p className="text-xl font-medium text-surface-900 dark:text-white/90 leading-relaxed drop-shadow-sm">
-                                    {interimText}
-                                </p>
-                            </div>
-                        )}
-
-                        <AnimatePresence mode="wait">
-                            {/* State A: Idle - Large mic button only */}
-                            {status === "ready" && (
-                                <motion.div
-                                    key="idle"
-                                    initial={{ opacity: 0, scale: 0.8 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.8 }}
-                                    transition={{ duration: 0.3 }}
-                                    className="flex items-center justify-center"
-                                >
-                                    <MicButton
-                                        isListening={false}
-                                        onClick={handleMicToggle}
-                                        disabled={false}
-                                    />
-                                </motion.div>
-                            )}
-
-                            {/* State B: Listening - Waveform + text */}
-                            {status === "listening" && (
-                                <motion.div
-                                    key="listening"
-                                    initial={{ opacity: 0, scale: 0.9 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.9 }}
-                                    transition={{ duration: 0.3 }}
-                                    className="flex flex-col items-center gap-2 group-hover:opacity-30 transition-opacity"
-                                >
-                                    <span className="text-sm text-surface-500 dark:text-white/70 font-medium">
-                                        Listening...
-                                    </span>
-                                    <div className="h-10 w-64 flex items-center justify-center relative">
-                                        <AudioWaveform isActive={true} color="#ef4444" />
-
-                                        {/* Manual Send Button */}
-                                        <button
-                                            onClick={handleManualVoiceSend}
-                                            className="
-                                                absolute right-4 top-1/2 -translate-y-1/2
-                                                p-3 rounded-full
-                                                bg-emerald-500 text-white
-                                                hover:bg-emerald-600
-                                                shadow-md
-                                                transition-all
-                                                z-30
-                                            "
-                                            title="Send now"
-                                        >
-                                            <SendIcon size={20} />
-                                        </button>
-                                    </div>
-                                </motion.div>
-                            )}
-
-                            {/* State C: Thinking */}
-                            {status === "thinking" && (
-                                <motion.div
-                                    key="thinking"
-                                    initial={{ opacity: 0 }}
-                                    animate={{ opacity: 1 }}
-                                    exit={{ opacity: 0 }}
-                                    transition={{ duration: 0.3 }}
-                                    className="flex flex-col items-center gap-2 group-hover:opacity-30 transition-opacity"
-                                >
-                                    <span className="text-sm text-surface-500 dark:text-white/70 font-medium">
-                                        Thinking...
-                                    </span>
-                                    <div className="flex gap-1">
-                                        <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                                        <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                                        <span className="w-2 h-2 bg-accent rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                                    </div>
-                                </motion.div>
-                            )}
-
-                            {/* State D: Speaking - Blue waveform */}
-                            {status === "speaking" && (
-                                <motion.div
-                                    key="speaking"
-                                    initial={{ opacity: 0, scale: 0.9 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.9 }}
-                                    transition={{ duration: 0.3 }}
-                                    className="flex flex-col items-center gap-2 group-hover:opacity-30 transition-opacity"
-                                >
-                                    <span className="text-sm text-surface-500 dark:text-white/70 font-medium">
-                                        Speaking...
-                                    </span>
-                                    <div className="h-10 w-64 flex items-center justify-center">
-                                        <AudioWaveform isActive={true} color="#06b6d4" />
-                                    </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
-                ) : (
-                    <div className="
-                        relative flex items-center
-                        w-80 h-32 px-4 py-4
-                        rounded-3xl
-                        bg-surface-50/50 dark:bg-white/5 backdrop-blur-md
-                        border border-black/10 dark:border-white/10
-                        overflow-hidden
-                        transition-all duration-300
-                        focus-within:ring-4 focus-within:ring-accent/20
-                    ">
-                        <textarea
-                            value={manualText}
-                            onChange={(e) => setManualText(e.target.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    if (manualText.trim()) {
-                                        processTranscript(manualText);
-                                        setManualText("");
-                                    }
-                                }
-                            }}
-                            placeholder="Type a message..."
-                            className="
-                                w-full h-full
-                                bg-transparent
-                                border-none outline-none resize-none
-                                text-surface-900 dark:text-white
-                                placeholder:text-surface-400 dark:placeholder:text-white/30
-                                text-lg font-medium
-                                scrollbar-hide
-                                pr-10
-                            "
-                            autoFocus
-                        />
-                        <button
-                            onClick={() => {
-                                if (manualText.trim()) {
-                                    processTranscript(manualText);
-                                    setManualText("");
-                                }
-                            }}
-                            disabled={!manualText.trim()}
-                            aria-label="Send message"
-                            className="
-                                absolute bottom-3 right-3
-                                p-3 rounded-full
-                                bg-accent text-white
-                                hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed
-                                transition-all
-                                shadow-sm
-                                active:scale-95
-                            "
-                        >
-                            <SendIcon size={24} />
-                        </button>
-                    </div>
-                )}
-
-                {/* Subtitle Text - Below control dock */}
-                <div
-                    className={`
-                        max-w-2xl w-full text-center text-xl font-medium text-surface-900 dark:text-white
-                        drop-shadow-md
-                        transition-opacity duration-1000 ease-out
-                        max-h-[30vh] overflow-y-auto px-4 scrollbar-thin scrollbar-thumb-surface-300 dark:scrollbar-thumb-white/20
-                        ${showText || isActive ? "opacity-100" : "opacity-0"}
-                    `}
-                >
-                    {getDisplayText()}
-                </div>
-            </main>
-
-            {/* Chat View Overlay */}
-            <ChatView
-                messages={messages}
-                isVisible={showChatView}
-                isSidebarOpen={isSidebarOpen}
-                onClose={() => setShowChatView(false)}
-            />
+      {/* ══════════════════════════════════════
+          MOBILE TOP BAR
+      ══════════════════════════════════════ */}
+      <div className="md:hidden flex items-center justify-between px-4 h-12 border-b border-white/15 shrink-0 bg-black">
+        <span className="text-white font-bold tracking-wide">EchoAI</span>
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${
+            status === "listening" ? "bg-red-400 animate-pulse" :
+            status === "thinking"  ? "bg-yellow-400 animate-bounce" :
+            status === "speaking"  ? "bg-blue-400 animate-pulse" :
+            "bg-white/20"
+          }`} />
+          <span className="text-xs text-white/40 capitalize">{status}</span>
         </div>
-    );
+      </div>
+
+      {/* ══════════════════════════════════════
+          DESKTOP LEFT SIDEBAR
+      ══════════════════════════════════════ */}
+      <aside className={`
+        hidden md:flex flex-shrink-0 flex-col
+        bg-black border-r-2 border-white/20
+        transition-all duration-300 ease-in-out z-30
+        ${sidebarOpen ? "w-56" : "w-16"}
+      `}>
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="flex items-center justify-center h-14 w-full border-b-2 border-white/20 hover:bg-white/5 transition-colors"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {sidebarOpen
+              ? <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>
+              : <><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>
+            }
+          </svg>
+        </button>
+        {([
+          { icon: "💬", label: "Chat",   tab: "chat"   as const },
+          { icon: "🤖", label: "Avatar", tab: "avatar" as const },
+          { icon: "🎙️", label: "Voice",  tab: "voice"  as const },
+        ]).map((item) => (
+          <button
+            key={item.tab}
+            onClick={() => setRightTab(item.tab)}
+            className={`flex items-center gap-3 px-4 py-4 transition-colors text-sm font-medium border-l-2 border-transparent
+              ${rightTab === item.tab ? "text-white bg-white/10 border-l-white" : "text-white/50 hover:text-white hover:bg-white/5"}`}
+          >
+            <span className="text-xl leading-none w-6 text-center">{item.icon}</span>
+            {sidebarOpen && <span className="whitespace-nowrap">{item.label}</span>}
+          </button>
+        ))}
+        <div className="flex-1" />
+        <button className="flex items-center gap-3 px-4 py-4 text-white/50 hover:text-white hover:bg-white/5 transition-colors">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          {sidebarOpen && <span className="text-sm whitespace-nowrap">Settings</span>}
+        </button>
+      </aside>
+
+      {/* ══════════════════════════════════════
+          MAIN CENTER — avatar + controls
+      ══════════════════════════════════════ */}
+      <main className="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0">
+
+        {/* Avatar */}
+        <div className={`
+          flex-1 flex items-center justify-center bg-black overflow-hidden min-h-0
+          md:m-4 md:border-2 md:border-white/20 md:rounded-2xl
+          transition-all duration-300
+        `}>
+          <MemoAvatar
+            isSpeaking={status === "speaking"}
+            isThinking={status === "thinking"}
+          />
+        </div>
+
+        {/* ── DESKTOP controls bar ── */}
+        <div
+          role="button" tabIndex={0}
+          onClick={(e) => { e.preventDefault(); if (inputMode === "text") return; if (status === "ready") handleMicToggle(); else handleCancel(); }}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (inputMode === "text") return; if (status === "ready") handleMicToggle(); else handleCancel(); } }}
+          className="hidden md:flex items-center justify-center gap-3 h-20 px-6 mx-4 mb-4 border-2 border-white/20 rounded-2xl bg-black cursor-pointer transition-all duration-200 hover:border-white/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 flex-shrink-0"
+        >
+          {inputMode === "voice" ? (
+            <div className="flex items-center gap-4 w-full justify-center">
+              <AnimatePresence mode="wait">
+                {status === "ready" && (
+                  <motion.div key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-3">
+                    <MicButton isListening={false} onClick={handleMicToggle} disabled={false} />
+                    <span className="text-sm text-white/50">Tap to speak</span>
+                  </motion.div>
+                )}
+                {status === "listening" && (
+                  <motion.div key="listening" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-3 w-full">
+                    <span className="text-sm text-white/60 shrink-0">Listening</span>
+                    <div className="flex-1 h-10"><AudioWaveform isActive={true} color="#3b82f6" /></div>
+                    <button onClick={(e) => { e.stopPropagation(); handleManualVoiceSend(e); }} className="p-2.5 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white transition-colors shrink-0"><SendIcon size={18} /></button>
+                  </motion.div>
+                )}
+                {status === "thinking" && (
+                  <motion.div key="thinking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-2">
+                    <span className="text-sm text-white/60">Thinking</span>
+                    <div className="flex gap-1">{[0,150,300].map((d) => <span key={d} className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div>
+                  </motion.div>
+                )}
+                {status === "speaking" && (
+                  <motion.div key="speaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-3 w-full">
+                    <span className="text-sm text-white/60 shrink-0">Speaking</span>
+                    <div className="flex-1 h-10"><AudioWaveform isActive={true} color="#3b82f6" /></div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              <button onClick={(e) => { e.stopPropagation(); setInputMode("text"); if (status === "listening") handleCancel(); }} className="p-2 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors shrink-0" title="Type"><KeyboardIcon size={18} /></button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 w-full" onClick={(e) => e.stopPropagation()}>
+              <textarea value={manualText} onChange={(e) => setManualText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (manualText.trim()) { processTranscript(manualText); setManualText(""); } } }}
+                placeholder="Type a message..." className="flex-1 bg-transparent border-none outline-none resize-none text-white placeholder:text-white/30 text-sm h-12 py-3" autoFocus />
+              <button onClick={() => { if (manualText.trim()) { processTranscript(manualText); setManualText(""); } }} disabled={!manualText.trim()} className="p-2.5 rounded-full bg-blue-500 hover:bg-blue-600 disabled:opacity-30 text-white transition-colors shrink-0"><SendIcon size={18} /></button>
+              <button onClick={(e) => { e.stopPropagation(); setInputMode("voice"); }} className="p-2 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors shrink-0"><MicIcon size={18} /></button>
+            </div>
+          )}
+        </div>
+
+        {/* ── MOBILE controls ── */}
+        <div className="md:hidden flex flex-col items-center gap-3 px-6 pb-3 shrink-0">
+          {inputMode === "voice" ? (
+            <div className="flex items-center gap-4 w-full justify-center">
+              <AnimatePresence mode="wait">
+                {status === "ready" && (
+                  <motion.div key="idle" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+                    className="flex flex-col items-center gap-2">
+                    <button
+                      onClick={handleMicToggle}
+                      className="w-20 h-20 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-95 flex items-center justify-center shadow-xl shadow-blue-600/40 transition-all duration-150"
+                    >
+                      <MicIcon size={34} />
+                    </button>
+                    <span className="text-xs text-white/40">Tap to speak</span>
+                  </motion.div>
+                )}
+                {status === "listening" && (
+                  <motion.div key="listening" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-3 w-full">
+                    <div className="flex-1 h-12"><AudioWaveform isActive={true} color="#3b82f6" /></div>
+                    <button onClick={(e) => { e.stopPropagation(); handleManualVoiceSend(e); }}
+                      className="w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shrink-0">
+                      <SendIcon size={22} />
+                    </button>
+                  </motion.div>
+                )}
+                {status === "thinking" && (
+                  <motion.div key="thinking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-2">
+                    <div className="w-20 h-20 rounded-full bg-white/5 border-2 border-white/15 flex items-center justify-center">
+                      <div className="flex gap-1.5">{[0,150,300].map((d) => <span key={d} className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div>
+                    </div>
+                    <span className="text-xs text-white/40">Thinking...</span>
+                  </motion.div>
+                )}
+                {status === "speaking" && (
+                  <motion.div key="speaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-2">
+                    <button onClick={handleCancel}
+                      className="w-20 h-20 rounded-full bg-white/5 border-2 border-blue-500/40 flex items-center justify-center">
+                      <AudioWaveform isActive={true} color="#3b82f6" />
+                    </button>
+                    <span className="text-xs text-white/40">Tap to stop</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              {status === "ready" && (
+                <button onClick={() => setInputMode("text")}
+                  className="absolute right-6 p-2.5 rounded-xl bg-white/5 border border-white/10 text-white/40">
+                  <KeyboardIcon size={20} />
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 w-full bg-white/5 border border-white/20 rounded-2xl px-4 py-2">
+              <textarea value={manualText} onChange={(e) => setManualText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (manualText.trim()) { processTranscript(manualText); setManualText(""); } } }}
+                placeholder="Type a message..." rows={1}
+                className="flex-1 bg-transparent border-none outline-none resize-none text-white placeholder:text-white/30 text-sm py-2" autoFocus />
+              <button onClick={() => { if (manualText.trim()) { processTranscript(manualText); setManualText(""); } }} disabled={!manualText.trim()}
+                className="p-2 rounded-full bg-blue-500 disabled:opacity-30 text-white shrink-0"><SendIcon size={18} /></button>
+              <button onClick={() => setInputMode("voice")} className="p-2 text-white/40 shrink-0"><MicIcon size={18} /></button>
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* ══════════════════════════════════════
+          DESKTOP RIGHT PANEL
+      ══════════════════════════════════════ */}
+      <aside className="hidden md:flex w-80 flex-shrink-0 flex-col border-l-2 border-white/20 bg-black overflow-hidden">
+        <div className="flex border-b-2 border-white/20 shrink-0">
+          {(["chat", "avatar", "voice"] as const).map((tab) => (
+            <button key={tab} onClick={() => setRightTab(tab)}
+              className={`flex-1 h-12 text-xs font-medium transition-colors ${rightTab === tab ? "text-white border-b-2 border-white bg-white/5" : "text-white/40 hover:text-white/70"}`}>
+              {tab === "chat" ? "💬 Chat" : tab === "avatar" ? "🤖 Avatar" : "🎙️ Voice"}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          {rightTab === "chat" && <ChatPanel messages={messages} interimText={interimText} status={status} chatEndRef={chatEndRef} />}
+          {rightTab === "avatar" && <AvatarPanel avatarId={avatarId} setAvatarId={setAvatarId} setAvatarType={setAvatarType} />}
+          {rightTab === "voice" && <VoicePanel tts={tts} status={status} />}
+        </div>
+      </aside>
+
+      {/* ══════════════════════════════════════
+          MOBILE BOTTOM SHEET + TAB BAR
+      ══════════════════════════════════════ */}
+      <div className="md:hidden flex flex-col shrink-0 border-t border-white/15 bg-black">
+        {/* Sheet content */}
+        <AnimatePresence>
+          {mobileSheetOpen && (
+            <motion.div
+              key="sheet"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 280, opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.25, ease: "easeInOut" }}
+              className="overflow-hidden"
+            >
+              <div className="h-full overflow-y-auto p-4">
+                {rightTab === "chat" && <ChatPanel messages={messages} interimText={interimText} status={status} chatEndRef={chatEndRef} />}
+                {rightTab === "avatar" && <AvatarPanel avatarId={avatarId} setAvatarId={setAvatarId} setAvatarType={setAvatarType} />}
+                {rightTab === "voice" && <VoicePanel tts={tts} status={status} />}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Tab bar */}
+        <div className="flex">
+          {(["chat", "avatar", "voice"] as const).map((tab) => (
+            <button key={tab}
+              onClick={() => {
+                if (rightTab === tab) { setMobileSheetOpen(!mobileSheetOpen); }
+                else { setRightTab(tab); setMobileSheetOpen(true); }
+              }}
+              className={`flex-1 py-3.5 flex flex-col items-center gap-0.5 text-xs font-medium transition-colors
+                ${rightTab === tab && mobileSheetOpen ? "text-white bg-white/8" : "text-white/40"}`}>
+              <span className="text-lg leading-none">{tab === "chat" ? "💬" : tab === "avatar" ? "🤖" : "🎙️"}</span>
+              <span className="text-[10px]">{tab === "chat" ? "Chat" : tab === "avatar" ? "Avatar" : "Voice"}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+/* ── Shared panel components ── */
+
+function ChatPanel({ messages, interimText, status, chatEndRef }: {
+  messages: ReturnType<typeof useChatStore.getState>["messages"];
+  interimText: string; status: string;
+  chatEndRef: React.RefObject<HTMLDivElement>;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      {messages.length === 0 && !interimText ? (
+        <div className="flex flex-col items-center justify-center gap-3 text-white/25 py-8">
+          <span className="text-3xl">💬</span>
+          <p className="text-sm text-center">Start a conversation.<br />Your chat will appear here.</p>
+        </div>
+      ) : (
+        <>
+          {messages.map((msg) => (
+            <div key={msg.id} className={`flex gap-2 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+              <div className={`w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-xs mt-0.5 ${msg.role === "user" ? "bg-blue-500" : "bg-white/10"}`}>
+                {msg.role === "user" ? "U" : "AI"}
+              </div>
+              <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
+                msg.role === "user"
+                  ? "bg-blue-500/20 border border-blue-500/30 text-white rounded-tr-sm"
+                  : "bg-white/5 border border-white/10 text-white/90 rounded-tl-sm"
+              }`}>{msg.content}</div>
+            </div>
+          ))}
+          {interimText && status === "listening" && (
+            <div className="flex gap-2 flex-row-reverse">
+              <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-xs mt-0.5 bg-blue-500">U</div>
+              <div className="max-w-[85%] px-3 py-2 rounded-2xl rounded-tr-sm text-sm leading-relaxed bg-blue-500/10 border border-blue-500/20 text-white/60 italic">
+                {interimText}<span className="inline-block w-1.5 h-3.5 ml-0.5 bg-blue-400/60 animate-pulse rounded-sm" />
+              </div>
+            </div>
+          )}
+          {interimText && status === "speaking" && (
+            <div className="flex gap-2 flex-row">
+              <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-xs mt-0.5 bg-white/10">AI</div>
+              <div className="max-w-[85%] px-3 py-2 rounded-2xl rounded-tl-sm text-sm leading-relaxed bg-white/5 border border-white/10 text-white/70">
+                {interimText}<span className="inline-block w-1.5 h-3.5 ml-0.5 bg-white/40 animate-pulse rounded-sm" />
+              </div>
+            </div>
+          )}
+          <div ref={chatEndRef} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function AvatarPanel({ avatarId, setAvatarId, setAvatarType }: {
+  avatarId: string;
+  setAvatarId: (id: string) => void;
+  setAvatarType: (type: "gif" | "image" | "realistic" | "photo") => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-white/40 uppercase tracking-wider font-semibold">Choose Avatar</p>
+      <div className="grid grid-cols-3 md:grid-cols-2 gap-3">
+        {AVATAR_OPTIONS.map((av) => (
+          <button key={av.id} onClick={() => { setAvatarId(av.id); setAvatarType(av.type); }}
+            className={`flex flex-col items-center gap-2 p-2.5 rounded-xl border-2 transition-all duration-200
+              ${avatarId === av.id ? "border-blue-500 bg-blue-500/10" : "border-white/15 hover:border-white/40 bg-white/5"}`}>
+            <div className="w-12 h-12 md:w-16 md:h-16 rounded-full overflow-hidden border-2 border-white/20 bg-white/5">
+              <img src={av.thumb} alt={av.label} className="w-full h-full object-cover"
+                loading="lazy"
+                decoding="async"
+                onError={(e) => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='%23334155'/%3E%3Ctext x='50' y='56' text-anchor='middle' font-size='32' fill='white'%3E🤖%3C/text%3E%3C/svg%3E"; }} />
+            </div>
+            <span className="text-xs text-white/80 font-medium text-center leading-tight">{av.label}</span>
+            {avatarId === av.id && <span className="text-[10px] text-blue-400 font-semibold">Active</span>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function VoicePanel({ tts, status }: { tts: ReturnType<typeof useSpeechSynthesis>; status: string }) {
+  return (
+    <div className="flex flex-col gap-5">
+      <p className="text-xs text-white/40 uppercase tracking-wider font-semibold">Voice Settings</p>
+      <div className="flex flex-col gap-2">
+        <label className="text-sm text-white/70 font-medium">Language / Voice</label>
+        <select value={tts.voiceConfig.voice?.name ?? ""}
+          onChange={(e) => { const v = tts.voices.find((v) => v.name === e.target.value); if (v) tts.setVoice(v); }}
+          className="w-full bg-white/5 border-2 border-white/20 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500 appearance-none cursor-pointer">
+          <option value="" disabled className="bg-black">Select a voice...</option>
+          {tts.voices.map((v) => <option key={v.name} value={v.name} className="bg-black text-white">{v.name} ({v.lang})</option>)}
+        </select>
+      </div>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <label className="text-sm text-white/70 font-medium">Speed</label>
+          <span className="text-sm text-white font-semibold">{tts.voiceConfig.rate.toFixed(1)}x</span>
+        </div>
+        <input type="range" min="0.5" max="2" step="0.1" value={tts.voiceConfig.rate}
+          onChange={(e) => tts.setRate(parseFloat(e.target.value))} className="w-full accent-blue-500 cursor-pointer" />
+        <div className="flex justify-between text-xs text-white/30"><span>0.5x Slow</span><span>2x Fast</span></div>
+      </div>
+      {!tts.isSupported && (
+        <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-200 leading-relaxed">
+          Speech output is not supported on this browser/device. Try Chrome, Edge, or Safari with system audio enabled.
+        </div>
+      )}
+      {tts.isSupported && tts.lastError && (
+        <div className="p-3 rounded-xl border border-yellow-400/30 bg-yellow-500/10 text-xs text-yellow-100 leading-relaxed">
+          {tts.lastError}
+        </div>
+      )}
+      <div className="p-3 rounded-xl border border-white/10 bg-white/5 flex items-center gap-3">
+        <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+          status === "listening" ? "bg-red-500 animate-pulse" :
+          status === "thinking"  ? "bg-yellow-400 animate-bounce" :
+          status === "speaking"  ? "bg-blue-400 animate-pulse" : "bg-white/20"}`} />
+        <span className="text-sm text-white/60 capitalize">{status}</span>
+      </div>
+    </div>
+  );
 }

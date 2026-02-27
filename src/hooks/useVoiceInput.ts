@@ -23,6 +23,35 @@ interface UseVoiceInputReturn {
   resetTranscript: () => void;
 }
 
+const normalizeTranscript = (text: string): string => text.replace(/\s+/g, " ").trim();
+
+// Some mobile SR engines repeat finalized words inside interim chunks.
+const mergeTranscriptParts = (finalText: string, interimText: string): string => {
+  const base = normalizeTranscript(finalText);
+  const live = normalizeTranscript(interimText);
+
+  if (!base) return live;
+  if (!live) return base;
+  if (base === live) return base;
+  if (live.startsWith(base)) return live;
+  if (base.startsWith(live)) return base;
+
+  const baseWords = base.split(" ");
+  const liveWords = live.split(" ");
+  const overlapLimit = Math.min(baseWords.length, liveWords.length);
+
+  for (let overlap = overlapLimit; overlap > 0; overlap -= 1) {
+    const baseSuffix = baseWords.slice(baseWords.length - overlap).join(" ");
+    const livePrefix = liveWords.slice(0, overlap).join(" ");
+    if (baseSuffix === livePrefix) {
+      const tail = liveWords.slice(overlap).join(" ");
+      return normalizeTranscript(`${base} ${tail}`);
+    }
+  }
+
+  return normalizeTranscript(`${base} ${live}`);
+};
+
 export function useVoiceInput(opts: UseVoiceInputOptions = {}): UseVoiceInputReturn {
   const { onSilenceDetected, silenceMs = 1500 } = opts;
 
@@ -32,11 +61,13 @@ export function useVoiceInput(opts: UseVoiceInputOptions = {}): UseVoiceInputRet
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const accumulatedRef = useRef("");
-  const currentSessionFinalRef = useRef("");
   const intentionalStopRef = useRef(false);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasSpokenRef = useRef(false);
   const onSilenceRef = useRef(onSilenceDetected);
+  const finalSegmentsRef = useRef<Record<number, string>>({});
+  // Tracks the latest non-final chunk from the current recognition session.
+  const currentSessionInterimRef = useRef("");
 
   // Keep callback ref in sync (no stale closures).
   useEffect(() => {
@@ -53,20 +84,22 @@ export function useVoiceInput(opts: UseVoiceInputOptions = {}): UseVoiceInputRet
   const startSilenceTimer = useCallback(() => {
     clearSilenceTimer();
     silenceTimerRef.current = setTimeout(() => {
+      const final = mergeTranscriptParts(accumulatedRef.current, currentSessionInterimRef.current);
       // Only auto-send if user actually spoke something.
-      if (hasSpokenRef.current && accumulatedRef.current.trim()) {
+      if (hasSpokenRef.current && final) {
         intentionalStopRef.current = true;
         recognitionRef.current?.stop();
         setIsListening(false);
-        const final = accumulatedRef.current.trim();
+        accumulatedRef.current = ""; // clear so a late onend can't re-send
+        currentSessionInterimRef.current = "";
+        finalSegmentsRef.current = {};
+        hasSpokenRef.current = false;
+        setTranscript("");
         setInterimTranscript("");
         onSilenceRef.current?.(final);
       }
     }, silenceMs);
   }, [silenceMs, clearSilenceTimer]);
-
-  /* ─── Add interim ref to track latest partials ─── */
-  const currentSessionInterimRef = useRef("");
 
   // Lazily initialise recognition once.
   const getRecognition = useCallback((): SpeechRecognition | null => {
@@ -82,30 +115,37 @@ export function useVoiceInput(opts: UseVoiceInputOptions = {}): UseVoiceInputRet
     rec.maxAlternatives = 1;
 
     rec.onresult = (event) => {
-      let sessionFinal = "";
-      let sessionInterim = "";
-
-      for (let i = 0; i < event.results.length; i++) {
-        const text = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          sessionFinal += text;
-        } else {
-          sessionInterim += text;
-        }
+      // Update finalized result slots from changed indices.
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const text = normalizeTranscript(event.results[i][0]?.transcript ?? "");
+        if (!text) continue;
+        if (event.results[i].isFinal) finalSegmentsRef.current[i] = text;
+        else delete finalSegmentsRef.current[i];
       }
 
-      sessionFinal = sessionFinal.trim();
-      sessionInterim = sessionInterim.trim();
+      const finalized = Object.keys(finalSegmentsRef.current)
+        .map(Number)
+        .sort((a, b) => a - b)
+        .map((index) => finalSegmentsRef.current[index])
+        .reduce((acc, part) => mergeTranscriptParts(acc, part), "");
 
-      currentSessionFinalRef.current = sessionFinal;
-      currentSessionInterimRef.current = sessionInterim;
+      let currentInterim = "";
+      for (let i = 0; i < event.results.length; i++) {
+        if (event.results[i].isFinal) continue;
+        const text = normalizeTranscript(event.results[i][0]?.transcript ?? "");
+        if (!text) continue;
+        currentInterim = mergeTranscriptParts(currentInterim, text);
+      }
 
-      const fullFinal = (accumulatedRef.current + " " + sessionFinal).trim();
-      setTranscript(fullFinal);
-      setInterimTranscript((fullFinal + " " + sessionInterim).trim());
+      accumulatedRef.current = finalized;
+      currentSessionInterimRef.current = currentInterim;
 
-      hasSpokenRef.current = true;
-      startSilenceTimer();
+      const merged = mergeTranscriptParts(finalized, currentInterim);
+      setTranscript(finalized);
+      setInterimTranscript(merged);
+
+      hasSpokenRef.current = merged.length > 0;
+      if (hasSpokenRef.current) startSilenceTimer();
     };
 
     rec.onerror = (event) => {
@@ -117,11 +157,8 @@ export function useVoiceInput(opts: UseVoiceInputOptions = {}): UseVoiceInputRet
     };
 
     rec.onend = () => {
-      if (currentSessionFinalRef.current) {
-        accumulatedRef.current = (accumulatedRef.current + " " + currentSessionFinalRef.current).trim();
-        currentSessionFinalRef.current = "";
-      }
-      currentSessionInterimRef.current = ""; // Clear interim on end
+      // Finals are already accumulated in onresult — nothing to merge here.
+      currentSessionInterimRef.current = "";
 
       if (!intentionalStopRef.current) {
         try {
@@ -144,8 +181,8 @@ export function useVoiceInput(opts: UseVoiceInputOptions = {}): UseVoiceInputRet
       return;
     }
     accumulatedRef.current = "";
-    currentSessionFinalRef.current = "";
     currentSessionInterimRef.current = "";
+    finalSegmentsRef.current = {};
     intentionalStopRef.current = false;
     hasSpokenRef.current = false;
     setTranscript("");
@@ -163,11 +200,7 @@ export function useVoiceInput(opts: UseVoiceInputOptions = {}): UseVoiceInputRet
     clearSilenceTimer();
 
     // Construct final result BEFORE aborting/stopping to ensure we capture everything
-    const final = [
-      accumulatedRef.current,
-      currentSessionFinalRef.current,
-      currentSessionInterimRef.current
-    ].filter(Boolean).join(" ").trim();
+    const final = mergeTranscriptParts(accumulatedRef.current, currentSessionInterimRef.current);
 
     try {
       recognitionRef.current?.abort();
@@ -180,8 +213,8 @@ export function useVoiceInput(opts: UseVoiceInputOptions = {}): UseVoiceInputRet
 
     // Reset refs appropriately
     accumulatedRef.current = "";
-    currentSessionFinalRef.current = "";
     currentSessionInterimRef.current = "";
+    finalSegmentsRef.current = {};
     hasSpokenRef.current = false;
 
     return final;
@@ -189,6 +222,8 @@ export function useVoiceInput(opts: UseVoiceInputOptions = {}): UseVoiceInputRet
 
   const resetTranscript = useCallback(() => {
     accumulatedRef.current = "";
+    currentSessionInterimRef.current = "";
+    finalSegmentsRef.current = {};
     hasSpokenRef.current = false;
     setTranscript("");
     setInterimTranscript("");

@@ -1,42 +1,28 @@
 import { memo } from "react";
-import { AVATAR } from "../../utils/constants";
+import { DEFAULT_HUMAN_AVATAR_ID, HUMAN_GIF_AVATARS } from "../../utils/constants";
 import { useChatStore } from "../../store/chatStore";
 
 interface Props {
     isSpeaking: boolean;
 }
 
-export const StaticAvatar = memo(function StaticAvatar({ isSpeaking }: Props) {
+export const StaticAvatar = memo(function StaticAvatar({ isSpeaking: _isSpeaking }: Props) {
     const avatarId = useChatStore((s) => s.avatarId);
 
-    // Map ID to filename
-    const getImageUrl = () => {
-        switch (avatarId) {
-            case "friendly-robo":
-                return "/assets/avatars/friendly-robo.jpg";
-            case "gradient-ai-robo":
-                return "/assets/avatars/gradient-ai-robo.jpg";
-            default:
-                return "/assets/avatars/friendly-robo.jpg";
-        }
-    };
+    const imageUrl =
+        HUMAN_GIF_AVATARS[avatarId as keyof typeof HUMAN_GIF_AVATARS]
+        ?? HUMAN_GIF_AVATARS[DEFAULT_HUMAN_AVATAR_ID];
 
     return (
         <img
-            src={getImageUrl()}
+            src={imageUrl}
             alt="Avatar"
-            className={`
-        rounded-full object-cover
-        transition-all duration-300
-        ${isSpeaking ? "scale-105 brightness-110" : "scale-100 brightness-100"}
-      `}
+            className="rounded-full object-cover"
             style={{
-                width: AVATAR.DISPLAY_SIZE,
-                height: AVATAR.DISPLAY_SIZE,
+                width: "100%",
+                height: "100%",
                 imageRendering: "auto",
-                // Ensure good quality for photos
             }}
         />
     );
 });
-

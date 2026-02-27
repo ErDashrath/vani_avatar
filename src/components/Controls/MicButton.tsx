@@ -23,19 +23,12 @@ export const MicButton = memo(function MicButton({
   disabled,
 }: MicButtonProps) {
   return (
-    <div className="relative flex items-center justify-center group">
-      {/* Pulse rings when listening */}
+    <div className="relative flex items-center justify-center">
+      {/* Subtle pulse ring when listening */}
       {isListening && (
-        <>
-          <span
-            className="absolute h-16 w-16 animate-pulse-ring rounded-full bg-speak/40"
-            style={{ animationDelay: "0s" }}
-          />
-          <span
-            className="absolute h-16 w-16 animate-pulse-ring rounded-full bg-speak/25"
-            style={{ animationDelay: "0.5s" }}
-          />
-        </>
+        <span
+          className="absolute h-20 w-20 animate-pulse-ring rounded-full bg-speak/30"
+        />
       )}
 
       {/* Main button */}
@@ -45,26 +38,22 @@ export const MicButton = memo(function MicButton({
         disabled={disabled}
         aria-label={isListening ? "Stop listening" : "Start listening"}
         className={`
-          relative z-10 flex h-14 w-14 items-center justify-center
+          relative z-10 flex h-16 w-16 items-center justify-center
           rounded-full
-          transition-all duration-300 ease-out
-          focus-visible:outline-none focus-visible:ring-4
-          focus-visible:ring-white/30 focus-visible:ring-offset-2
-          focus-visible:ring-offset-transparent
+          transition-all duration-200 ease-out
+          focus-visible:outline-none focus-visible:ring-2
+          focus-visible:ring-accent focus-visible:ring-offset-2
           disabled:pointer-events-none disabled:opacity-40
           ${isListening
-            ? "bg-speak text-white shadow-glow-red scale-110"
-            : "bg-surface-200 text-surface-900 hover:bg-surface-300 dark:bg-white/10 dark:text-white dark:hover:bg-white/20 hover:scale-110 active:scale-95"
+            ? "bg-speak text-white scale-110"
+            : "bg-white text-surface-700 hover:bg-surface-50 border border-surface-200 dark:bg-surface-800 dark:text-white dark:border-surface-700 dark:hover:bg-surface-700 hover:scale-105 active:scale-95"
           }
         `}
         style={{ touchAction: "manipulation" }}
       >
         <MicIcon
-          size={32}
-          className={`
-            transition-transform duration-300
-            ${isListening ? "animate-pulse" : ""}
-          `}
+          size={28}
+          className="transition-transform duration-200"
         />
       </button>
     </div>

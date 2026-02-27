@@ -19,11 +19,11 @@ export function RealisticAvatar({ isSpeaking }: Props) {
       ref={canvasRef}
       width={AVATAR.SIZE}
       height={AVATAR.SIZE}
-      className="relative z-10 rounded-2xl shadow-2xl"
+      className="relative z-10 rounded-full"
       style={{
         width: AVATAR.DISPLAY_SIZE,
         height: AVATAR.DISPLAY_SIZE,
-        borderRadius: "1rem",
+        borderRadius: "50%",
         imageRendering: "auto",
       }}
     />

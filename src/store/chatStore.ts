@@ -9,7 +9,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { AppStatus, AvatarType, ConversationEntry } from "../types";
-import { uid } from "../utils/constants";
+import { DEFAULT_HUMAN_AVATAR_ID, uid } from "../utils/constants";
 
 interface ChatState {
   status: AppStatus;
@@ -35,7 +35,7 @@ export const useChatStore = create<ChatState>()(
       messages: [],
       interimText: "",
       avatarType: "gif",
-      avatarId: "dashrath",
+      avatarId: DEFAULT_HUMAN_AVATAR_ID,
       theme: "system",
 
       setStatus: (status) => set({ status }),

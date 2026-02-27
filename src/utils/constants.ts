@@ -30,10 +30,21 @@ export const ANIM = {
 /** Canvas avatar sizing – realistic human face. */
 export const AVATAR = {
   /** Canvas pixel dimensions (high-res for detail). */
-  SIZE: 320,
+  SIZE: 480,
   /** Display size in CSS pixels. */
-  DISPLAY_SIZE: 280,
+  DISPLAY_SIZE: 450,
 } as const;
+
+/** Human-only GIF avatar catalog. */
+export const HUMAN_GIF_AVATARS = {
+  dashrath: "/assets/dashrath.gif",
+  women: "/assets/women.gif",
+  emp1: "/assets/emp1.gif",
+  emp2: "/assets/emp2.gif",
+  emp3: "/assets/emp3.gif",
+} as const;
+
+export const DEFAULT_HUMAN_AVATAR_ID = "emp1";
 
 /** Unique ID helper. */
 let _seq = 0;

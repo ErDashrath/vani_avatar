@@ -6,47 +6,36 @@
  */
 
 import { useRef, useEffect, useState } from "react";
-import { AVATAR } from "../../utils/constants";
+import { AVATAR, DEFAULT_HUMAN_AVATAR_ID, HUMAN_GIF_AVATARS } from "../../utils/constants";
 import { useChatStore } from "../../store/chatStore";
 
 interface GifAvatarProps {
   isSpeaking: boolean;
 }
 
-const DEFAULT_GIF = "/assets/avatar.gif";
-const GIF_DURATION_MS = 5000;
-
 export function GifAvatar({ isSpeaking }: GifAvatarProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
-  const gifLoopCountRef = useRef(0);
-  const loopIntervalRef = useRef<number | null>(null);
-  const [showAnimated, setShowAnimated] = useState(false);
+  const [idleFrameReady, setIdleFrameReady] = useState(false);
+  const [animatedReady, setAnimatedReady] = useState(false);
+  const [shouldLoadAnimated, setShouldLoadAnimated] = useState(false);
 
   const avatarId = useChatStore((s) => s.avatarId);
 
-  const getGifUrl = () => {
-    switch (avatarId) {
-      case "gradient-ai-robo": // User's requested change
-        return "/assets/avatars/gradient-robo.gif";
-      case "robo":
-        return "/assets/avatars/robo-f.gif";
-      case "dashrath":
-        return "/assets/dashrath.gif";
-      case "humoied":
-        return "/assets/humoied.gif";
-      case "women":
-        return "/assets/women.gif";
-      case "gif":
-      default:
-        return DEFAULT_GIF;
-    }
-  };
+  const getGifUrl = () =>
+    HUMAN_GIF_AVATARS[avatarId as keyof typeof HUMAN_GIF_AVATARS]
+    ?? HUMAN_GIF_AVATARS[DEFAULT_HUMAN_AVATAR_ID];
 
   const gifUrl = getGifUrl();
+  const showAnimated = isSpeaking && animatedReady;
+  const showIdleFrame = idleFrameReady && (!isSpeaking || !animatedReady);
+  const showPlaceholder = !showIdleFrame && !showAnimated;
 
   // Load first frame of GIF to canvas for idle state
   useEffect(() => {
+    setIdleFrameReady(false);
+    setAnimatedReady(false);
+    setShouldLoadAnimated(false);
+
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -54,82 +43,52 @@ export function GifAvatar({ isSpeaking }: GifAvatarProps) {
     if (!ctx) return;
 
     const img = new Image();
-    img.crossOrigin = "anonymous";
     img.onload = () => {
-      canvas.width = AVATAR.SIZE;
-      canvas.height = AVATAR.SIZE;
+      try {
+        canvas.width = AVATAR.SIZE;
+        canvas.height = AVATAR.SIZE;
 
-      // Calculate scaling to cover canvas
-      const imgAspect = img.width / img.height;
-      const canvasAspect = 1;
+        // Calculate scaling to cover canvas
+        const imgAspect = img.width / img.height;
+        const canvasAspect = 1;
 
-      let drawWidth, drawHeight, offsetX, offsetY;
-      if (imgAspect > canvasAspect) {
-        drawHeight = AVATAR.SIZE;
-        drawWidth = AVATAR.SIZE * imgAspect;
-        offsetX = (AVATAR.SIZE - drawWidth) / 2;
-        offsetY = 0;
-      } else {
-        drawWidth = AVATAR.SIZE;
-        drawHeight = AVATAR.SIZE / imgAspect;
-        offsetX = 0;
-        offsetY = (AVATAR.SIZE - drawHeight) / 2;
+        let drawWidth, drawHeight, offsetX, offsetY;
+        if (imgAspect > canvasAspect) {
+          drawHeight = AVATAR.SIZE;
+          drawWidth = AVATAR.SIZE * imgAspect;
+          offsetX = (AVATAR.SIZE - drawWidth) / 2;
+          offsetY = 0;
+        } else {
+          drawWidth = AVATAR.SIZE;
+          drawHeight = AVATAR.SIZE / imgAspect;
+          offsetX = 0;
+          offsetY = (AVATAR.SIZE - drawHeight) / 2;
+        }
+
+        ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+        setIdleFrameReady(true);
+      } catch {
+        // Mobile canvas/GIF decode can fail for large files. Use img fallback.
+        setIdleFrameReady(false);
       }
-
-      ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+    };
+    img.onerror = () => {
+      setIdleFrameReady(false);
     };
     img.src = gifUrl;
   }, [gifUrl]);
 
-  // Handle GIF animation when speaking
+  // Load heavy animated GIF only once needed (first speaking event).
   useEffect(() => {
-    if (isSpeaking) {
-      // Speech started - show animated GIF
-      gifLoopCountRef.current = 0;
-      setShowAnimated(true);
-
-      if (imgRef.current) {
-        imgRef.current.src = `${gifUrl}?t=${Date.now()}`;
-      }
-      console.log('[GifAvatar] 🎬 GIF started for speech');
-
-      // Set up loop interval to restart GIF if speech continues
-      loopIntervalRef.current = window.setInterval(() => {
-        if (imgRef.current) {
-          gifLoopCountRef.current++;
-          imgRef.current.src = `${gifUrl}?t=${Date.now()}`;
-          console.log(`[GifAvatar] 🔄 GIF looped #${gifLoopCountRef.current}`);
-        }
-      }, GIF_DURATION_MS);
-
-    } else {
-      // Speech stopped - show static canvas
-      if (loopIntervalRef.current) {
-        clearInterval(loopIntervalRef.current);
-        loopIntervalRef.current = null;
-      }
-
-      setShowAnimated(false);
-
-      if (gifLoopCountRef.current > 0) {
-        console.log(`[GifAvatar] 🛑 Speech stopped. GIF looped ${gifLoopCountRef.current} times`);
-      }
-      gifLoopCountRef.current = 0;
-    }
-
-    return () => {
-      if (loopIntervalRef.current) {
-        clearInterval(loopIntervalRef.current);
-      }
-    };
+    if (isSpeaking) setShouldLoadAnimated(true);
   }, [isSpeaking]);
 
   return (
     <div
-      className="rounded-full overflow-hidden bg-surface-200 dark:bg-surface-900 relative flex items-center justify-center shadow-xl"
+      className="rounded-full overflow-hidden bg-surface-200 dark:bg-surface-900 relative flex items-center justify-center"
       style={{
-        width: `${AVATAR.DISPLAY_SIZE}px`,
-        height: `${AVATAR.DISPLAY_SIZE}px`,
+        width: "100%",
+        height: "100%",
       }}
     >
       {/* Static first frame when idle */}
@@ -140,53 +99,36 @@ export function GifAvatar({ isSpeaking }: GifAvatarProps) {
         style={{
           width: "100%",
           height: "100%",
-          display: showAnimated ? "none" : "block",
+          display: showIdleFrame ? "block" : "none",
         }}
       />
 
-      {/* Animated GIF when speaking */}
-      <img
-        ref={imgRef}
-        src={gifUrl}
-        alt="Animated Avatar"
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          display: showAnimated ? "block" : "none",
-        }}
-      />
-
-      {/* Speaking indicator ring */}
-      {isSpeaking && (
+      {/* Stable placeholder while idle frame is preparing */}
+      {showPlaceholder && (
         <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            borderRadius: "50%",
-            border: "4px solid rgba(6,182,212,0.5)",
-            boxShadow: "0 0 20px rgba(6,182,212,0.8)",
-            pointerEvents: "none",
-            animation: "pulse 2s ease-in-out infinite",
-          }}
+          className="absolute inset-0 bg-surface-200 dark:bg-surface-900"
+          aria-hidden="true"
         />
       )}
 
-      <style>{`
-        @keyframes pulse {
-          0%, 100% {
-            opacity: 0.5;
-            transform: scale(1);
-          }
-          50% {
-            opacity: 1;
-            transform: scale(1.02);
-          }
-        }
-      `}</style>
+      {/* Animated GIF when speaking */}
+      {shouldLoadAnimated && (
+        <img
+          src={gifUrl}
+          alt="Animated Avatar"
+          loading="auto"
+          decoding="async"
+          draggable={false}
+          onLoad={() => setAnimatedReady(true)}
+          onError={() => setAnimatedReady(false)}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: showAnimated ? "block" : "none",
+          }}
+        />
+      )}
     </div>
   );
 }

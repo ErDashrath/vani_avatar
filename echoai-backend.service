@@ -1,0 +1,15 @@
+[Unit]
+Description=EchoAI FastAPI Backend
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/avatar/backend
+ExecStart=/var/www/avatar/backend/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8765 --workers 2
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
