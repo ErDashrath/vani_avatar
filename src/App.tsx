@@ -28,20 +28,20 @@ export default function App() {
   const api = useChatAPI();
   useTheme();
 
-  const status         = useChatStore((s) => s.status);
-  const setStatus      = useChatStore((s) => s.setStatus);
+  const status = useChatStore((s) => s.status);
+  const setStatus = useChatStore((s) => s.setStatus);
   const setInterimText = useChatStore((s) => s.setInterimText);
-  const addMessage     = useChatStore((s) => s.addMessage);
-  const interimText    = useChatStore((s) => s.interimText);
-  const messages       = useChatStore((s) => s.messages);
-  const avatarId       = useChatStore((s) => s.avatarId);
-  const setAvatarId    = useChatStore((s) => s.setAvatarId);
-  const setAvatarType  = useChatStore((s) => s.setAvatarType);
+  const addMessage = useChatStore((s) => s.addMessage);
+  const interimText = useChatStore((s) => s.interimText);
+  const messages = useChatStore((s) => s.messages);
+  const avatarId = useChatStore((s) => s.avatarId);
+  const setAvatarId = useChatStore((s) => s.setAvatarId);
+  const setAvatarType = useChatStore((s) => s.setAvatarType);
 
   const processingRef = useRef(false);
 
   // Input mode
-  const [inputMode, setInputMode]   = useState<"voice" | "text">("voice");
+  const [inputMode, setInputMode] = useState<"voice" | "text">("voice");
   const [manualText, setManualText] = useState("");
 
   // Left sidebar (collapsed icon-only or expanded) — desktop only
@@ -207,12 +207,11 @@ export default function App() {
       <div className="md:hidden flex items-center justify-between px-4 h-12 border-b border-white/15 shrink-0 bg-black">
         <span className="text-white font-bold tracking-wide">EchoAI</span>
         <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${
-            status === "listening" ? "bg-red-400 animate-pulse" :
-            status === "thinking"  ? "bg-yellow-400 animate-bounce" :
-            status === "speaking"  ? "bg-blue-400 animate-pulse" :
-            "bg-white/20"
-          }`} />
+          <div className={`w-2 h-2 rounded-full ${status === "listening" ? "bg-red-400 animate-pulse" :
+            status === "thinking" ? "bg-yellow-400 animate-bounce" :
+              status === "speaking" ? "bg-blue-400 animate-pulse" :
+                "bg-white/20"
+            }`} />
           <span className="text-xs text-white/40 capitalize">{status}</span>
         </div>
       </div>
@@ -238,9 +237,9 @@ export default function App() {
           </svg>
         </button>
         {([
-          { icon: "💬", label: "Chat",   tab: "chat"   as const },
+          { icon: "💬", label: "Chat", tab: "chat" as const },
           { icon: "🤖", label: "Avatar", tab: "avatar" as const },
-          { icon: "🎙️", label: "Voice",  tab: "voice"  as const },
+          { icon: "🎙️", label: "Voice", tab: "voice" as const },
         ]).map((item) => (
           <button
             key={item.tab}
@@ -305,7 +304,7 @@ export default function App() {
                 {status === "thinking" && (
                   <motion.div key="thinking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-2">
                     <span className="text-sm text-white/60">Thinking</span>
-                    <div className="flex gap-1">{[0,150,300].map((d) => <span key={d} className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div>
+                    <div className="flex gap-1">{[0, 150, 300].map((d) => <span key={d} className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div>
                   </motion.div>
                 )}
                 {status === "speaking" && (
@@ -328,82 +327,15 @@ export default function App() {
           )}
         </div>
 
-        {/* ── MOBILE controls ── */}
-        <div className="md:hidden flex flex-col items-center gap-3 px-6 pb-3 shrink-0">
-          {inputMode === "voice" ? (
-            <div className="flex items-center gap-4 w-full justify-center">
-              <AnimatePresence mode="wait">
-                {status === "ready" && (
-                  <motion.div key="idle" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-                    className="flex flex-col items-center gap-2">
-                    <button
-                      onClick={handleMicToggle}
-                      className="w-20 h-20 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-95 flex items-center justify-center shadow-xl shadow-blue-600/40 transition-all duration-150"
-                    >
-                      <MicIcon size={34} />
-                    </button>
-                    <span className="text-xs text-white/40">Tap to speak</span>
-                  </motion.div>
-                )}
-                {status === "listening" && (
-                  <motion.div key="listening" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-3 w-full">
-                    <div className="flex-1 h-12"><AudioWaveform isActive={true} color="#3b82f6" /></div>
-                    <button onClick={(e) => { e.stopPropagation(); handleManualVoiceSend(e); }}
-                      className="w-14 h-14 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shrink-0">
-                      <SendIcon size={22} />
-                    </button>
-                  </motion.div>
-                )}
-                {status === "thinking" && (
-                  <motion.div key="thinking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-2">
-                    <div className="w-20 h-20 rounded-full bg-white/5 border-2 border-white/15 flex items-center justify-center">
-                      <div className="flex gap-1.5">{[0,150,300].map((d) => <span key={d} className="w-2 h-2 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div>
-                    </div>
-                    <span className="text-xs text-white/40">Thinking...</span>
-                  </motion.div>
-                )}
-                {status === "speaking" && (
-                  <motion.div key="speaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-2">
-                    <button onClick={handleCancel}
-                      className="w-20 h-20 rounded-full bg-white/5 border-2 border-blue-500/40 flex items-center justify-center">
-                      <AudioWaveform isActive={true} color="#3b82f6" />
-                    </button>
-                    <span className="text-xs text-white/40">Tap to stop</span>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-              {status === "ready" && (
-                <button onClick={() => setInputMode("text")}
-                  className="absolute right-6 p-2.5 rounded-xl bg-white/5 border border-white/10 text-white/40">
-                  <KeyboardIcon size={20} />
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 w-full bg-white/5 border border-white/20 rounded-2xl px-4 py-2">
-              <textarea value={manualText} onChange={(e) => setManualText(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (manualText.trim()) { processTranscript(manualText); setManualText(""); } } }}
-                placeholder="Type a message..." rows={1}
-                className="flex-1 bg-transparent border-none outline-none resize-none text-white placeholder:text-white/30 text-sm py-2" autoFocus />
-              <button onClick={() => { if (manualText.trim()) { processTranscript(manualText); setManualText(""); } }} disabled={!manualText.trim()}
-                className="p-2 rounded-full bg-blue-500 disabled:opacity-30 text-white shrink-0"><SendIcon size={18} /></button>
-              <button onClick={() => setInputMode("voice")} className="p-2 text-white/40 shrink-0"><MicIcon size={18} /></button>
-            </div>
-          )}
-        </div>
+        {/* Mobile controls moved down to bottom sheet container */}
       </main>
 
       {/* ══════════════════════════════════════
           DESKTOP RIGHT PANEL
       ══════════════════════════════════════ */}
       <aside className="hidden md:flex w-80 flex-shrink-0 flex-col border-l-2 border-white/20 bg-black overflow-hidden">
-        <div className="flex border-b-2 border-white/20 shrink-0">
-          {(["chat", "avatar", "voice"] as const).map((tab) => (
-            <button key={tab} onClick={() => setRightTab(tab)}
-              className={`flex-1 h-12 text-xs font-medium transition-colors ${rightTab === tab ? "text-white border-b-2 border-white bg-white/5" : "text-white/40 hover:text-white/70"}`}>
-              {tab === "chat" ? "💬 Chat" : tab === "avatar" ? "🤖 Avatar" : "🎙️ Voice"}
-            </button>
-          ))}
+        <div className="flex items-center h-12 px-4 border-b-2 border-white/20 text-sm font-semibold text-white/80 shrink-0">
+          {rightTab === "chat" ? "💬 Chat" : rightTab === "avatar" ? "🤖 Avatar" : "🎙️ Voice"}
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           {rightTab === "chat" && <ChatPanel messages={messages} interimText={interimText} status={status} chatEndRef={chatEndRef} />}
@@ -435,6 +367,69 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* ── MOBILE controls (Moved from main area) ── */}
+        <div className="flex flex-col items-center gap-3 px-4 py-3 border-b border-white/10 shrink-0 bg-black z-10 relative">
+          {inputMode === "voice" ? (
+            <div className="flex items-center gap-4 w-full justify-center">
+              <AnimatePresence mode="wait">
+                {status === "ready" && (
+                  <motion.div key="idle" initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+                    className="flex flex-col items-center gap-2">
+                    <button
+                      onClick={handleMicToggle}
+                      className="w-16 h-16 rounded-full bg-blue-600 hover:bg-blue-500 active:scale-95 flex items-center justify-center shadow-xl shadow-blue-600/40 transition-all duration-150"
+                    >
+                      <MicIcon size={30} />
+                    </button>
+                  </motion.div>
+                )}
+                {status === "listening" && (
+                  <motion.div key="listening" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-3 w-full">
+                    <div className="flex-1 h-12"><AudioWaveform isActive={true} color="#3b82f6" /></div>
+                    <button onClick={(e) => { e.stopPropagation(); handleManualVoiceSend(e); }}
+                      className="w-12 h-12 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg shrink-0">
+                      <SendIcon size={20} />
+                    </button>
+                  </motion.div>
+                )}
+                {status === "thinking" && (
+                  <motion.div key="thinking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-white/5 border-2 border-white/15 flex items-center justify-center shrink-0">
+                      <div className="flex gap-1">{[0, 150, 300].map((d) => <span key={d} className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: `${d}ms` }} />)}</div>
+                    </div>
+                    <span className="text-sm text-white/60">Thinking...</span>
+                  </motion.div>
+                )}
+                {status === "speaking" && (
+                  <motion.div key="speaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex items-center justify-center w-full relative">
+                    <button onClick={handleCancel}
+                      className="w-16 h-16 rounded-full bg-white/5 border-2 border-blue-500/40 flex items-center justify-center">
+                      <AudioWaveform isActive={true} color="#3b82f6" />
+                    </button>
+                    <span className="absolute right-0 text-xs text-white/40">Tap to stop</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              {status === "ready" && (
+                <button onClick={() => setInputMode("text")}
+                  className="absolute right-4 p-2.5 rounded-xl bg-white/5 border border-white/10 text-white/60 hover:text-white transition-colors">
+                  <KeyboardIcon size={20} />
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 w-full bg-white/5 border border-white/20 rounded-2xl px-3 py-1.5">
+              <textarea value={manualText} onChange={(e) => setManualText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (manualText.trim()) { processTranscript(manualText); setManualText(""); } } }}
+                placeholder="Type a message..." rows={1}
+                className="flex-1 bg-transparent border-none outline-none resize-none text-white placeholder:text-white/30 text-base py-2.5" autoFocus />
+              <button onClick={() => { if (manualText.trim()) { processTranscript(manualText); setManualText(""); } }} disabled={!manualText.trim()}
+                className="p-2.5 rounded-full bg-blue-500 disabled:opacity-30 text-white shrink-0"><SendIcon size={18} /></button>
+              <button onClick={() => setInputMode("voice")} className="p-2.5 text-white/50 hover:text-white shrink-0"><MicIcon size={20} /></button>
+            </div>
+          )}
+        </div>
 
         {/* Tab bar */}
         <div className="flex">
@@ -478,11 +473,10 @@ function ChatPanel({ messages, interimText, status, chatEndRef }: {
               <div className={`w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-xs mt-0.5 ${msg.role === "user" ? "bg-blue-500" : "bg-white/10"}`}>
                 {msg.role === "user" ? "U" : "AI"}
               </div>
-              <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${
-                msg.role === "user"
-                  ? "bg-blue-500/20 border border-blue-500/30 text-white rounded-tr-sm"
-                  : "bg-white/5 border border-white/10 text-white/90 rounded-tl-sm"
-              }`}>{msg.content}</div>
+              <div className={`max-w-[85%] px-3 py-2 rounded-2xl text-sm leading-relaxed ${msg.role === "user"
+                ? "bg-blue-500/20 border border-blue-500/30 text-white rounded-tr-sm"
+                : "bg-white/5 border border-white/10 text-white/90 rounded-tl-sm"
+                }`}>{msg.content}</div>
             </div>
           ))}
           {interimText && status === "listening" && (
@@ -569,10 +563,9 @@ function VoicePanel({ tts, status }: { tts: ReturnType<typeof useSpeechSynthesis
         </div>
       )}
       <div className="p-3 rounded-xl border border-white/10 bg-white/5 flex items-center gap-3">
-        <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-          status === "listening" ? "bg-red-500 animate-pulse" :
-          status === "thinking"  ? "bg-yellow-400 animate-bounce" :
-          status === "speaking"  ? "bg-blue-400 animate-pulse" : "bg-white/20"}`} />
+        <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${status === "listening" ? "bg-red-500 animate-pulse" :
+          status === "thinking" ? "bg-yellow-400 animate-bounce" :
+            status === "speaking" ? "bg-blue-400 animate-pulse" : "bg-white/20"}`} />
         <span className="text-sm text-white/60 capitalize">{status}</span>
       </div>
     </div>

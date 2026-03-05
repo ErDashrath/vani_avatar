@@ -16,7 +16,7 @@ interface AvatarProps {
   isThinking: boolean;
 }
 
-export const Avatar = memo(function Avatar({ isSpeaking, isThinking: _isThinking }: AvatarProps) {
+export const Avatar = memo(function Avatar({ isSpeaking, isThinking }: AvatarProps) {
   const avatarType = useChatStore((s) => s.avatarType);
 
   return (
@@ -35,7 +35,7 @@ export const Avatar = memo(function Avatar({ isSpeaking, isThinking: _isThinking
         {/* Avatar renderer */}
         {avatarType === "realistic" && <RealisticAvatar isSpeaking={isSpeaking} />}
         {avatarType === "photo" && <PhotoAvatar isSpeaking={isSpeaking} />}
-        {avatarType === "gif" && <GifAvatar isSpeaking={isSpeaking} />}
+        {avatarType === "gif" && <GifAvatar isSpeaking={isSpeaking} isThinking={isThinking} />}
         {avatarType === "image" && <StaticAvatar isSpeaking={isSpeaking} />}
       </div>
     </figure>

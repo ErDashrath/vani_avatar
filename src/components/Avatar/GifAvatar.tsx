@@ -1,40 +1,50 @@
 /**
- * GifAvatar – Animated GIF that plays during speech.
+ * GifAvatar – Animated GIF that plays during speech or thinking.
  * 
  * Shows first frame of GIF when idle (canvas).
+ * Plays thinking GIF when thinking (if available for the avatar).
  * Plays animated GIF when speaking (img element).
  */
 
 import { useRef, useEffect, useState } from "react";
-import { AVATAR, DEFAULT_HUMAN_AVATAR_ID, HUMAN_GIF_AVATARS } from "../../utils/constants";
+import { AVATAR, DEFAULT_HUMAN_AVATAR_ID, HUMAN_GIF_AVATARS, HUMAN_GIF_THINKING_AVATARS } from "../../utils/constants";
 import { useChatStore } from "../../store/chatStore";
 
 interface GifAvatarProps {
   isSpeaking: boolean;
+  isThinking: boolean;
 }
 
-export function GifAvatar({ isSpeaking }: GifAvatarProps) {
+export function GifAvatar({ isSpeaking, isThinking }: GifAvatarProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [idleFrameReady, setIdleFrameReady] = useState(false);
   const [animatedReady, setAnimatedReady] = useState(false);
   const [shouldLoadAnimated, setShouldLoadAnimated] = useState(false);
+  const [thinkingGifReady, setThinkingGifReady] = useState(false);
+  const [shouldLoadThinking, setShouldLoadThinking] = useState(false);
 
   const avatarId = useChatStore((s) => s.avatarId);
 
-  const getGifUrl = () =>
+  const gifUrl =
     HUMAN_GIF_AVATARS[avatarId as keyof typeof HUMAN_GIF_AVATARS]
     ?? HUMAN_GIF_AVATARS[DEFAULT_HUMAN_AVATAR_ID];
 
-  const gifUrl = getGifUrl();
-  const showAnimated = isSpeaking && animatedReady;
-  const showIdleFrame = idleFrameReady && (!isSpeaking || !animatedReady);
-  const showPlaceholder = !showIdleFrame && !showAnimated;
+  const thinkingGifUrl =
+    HUMAN_GIF_THINKING_AVATARS[avatarId as keyof typeof HUMAN_GIF_THINKING_AVATARS];
+
+  const hasThinkingGif = !!thinkingGifUrl;
+  const showThinking = isThinking && hasThinkingGif && thinkingGifReady;
+  const showAnimated = isSpeaking && animatedReady && !isThinking;
+  const showIdleFrame = idleFrameReady && !showAnimated && !showThinking;
+  const showPlaceholder = !showIdleFrame && !showAnimated && !showThinking;
 
   // Load first frame of GIF to canvas for idle state
   useEffect(() => {
     setIdleFrameReady(false);
     setAnimatedReady(false);
     setShouldLoadAnimated(false);
+    setThinkingGifReady(false);
+    setShouldLoadThinking(false);
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -83,6 +93,11 @@ export function GifAvatar({ isSpeaking }: GifAvatarProps) {
     if (isSpeaking) setShouldLoadAnimated(true);
   }, [isSpeaking]);
 
+  // Load thinking GIF only once needed (first thinking event).
+  useEffect(() => {
+    if (isThinking && hasThinkingGif) setShouldLoadThinking(true);
+  }, [isThinking, hasThinkingGif]);
+
   return (
     <div
       className="rounded-full overflow-hidden bg-surface-200 dark:bg-surface-900 relative flex items-center justify-center"
@@ -111,12 +126,31 @@ export function GifAvatar({ isSpeaking }: GifAvatarProps) {
         />
       )}
 
+      {/* Thinking GIF when thinking (for avatars that have one) */}
+      {shouldLoadThinking && thinkingGifUrl && (
+        <img
+          src={thinkingGifUrl}
+          alt="Thinking Avatar"
+          loading="eager"
+          decoding="async"
+          draggable={false}
+          onLoad={() => setThinkingGifReady(true)}
+          onError={() => setThinkingGifReady(false)}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: showThinking ? "block" : "none",
+          }}
+        />
+      )}
+
       {/* Animated GIF when speaking */}
       {shouldLoadAnimated && (
         <img
           src={gifUrl}
           alt="Animated Avatar"
-          loading="auto"
+          loading="eager"
           decoding="async"
           draggable={false}
           onLoad={() => setAnimatedReady(true)}

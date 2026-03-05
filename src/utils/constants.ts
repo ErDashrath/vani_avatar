@@ -44,6 +44,12 @@ export const HUMAN_GIF_AVATARS = {
   emp3: "/assets/emp3.gif",
 } as const;
 
+/** Thinking-state GIF variants (only for avatars that have one). */
+export const HUMAN_GIF_THINKING_AVATARS: Partial<Record<keyof typeof HUMAN_GIF_AVATARS, string>> = {
+  dashrath: "/assets/dashrath-thinking.gif",
+  women: "/assets/women-thinking.gif",
+};
+
 export const DEFAULT_HUMAN_AVATAR_ID = "emp1";
 
 /** Unique ID helper. */
